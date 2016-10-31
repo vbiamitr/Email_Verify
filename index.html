@@ -1,0 +1,273 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<link href="./assets/bootstrap/css/bootstrap.min.css" rel="stylesheet"></link>
+<title>Visual BI Verify Email</title>
+<style>
+#processing_div {
+    text-align:center;
+    width: 100%;
+    display:none;
+    position: absolute;
+    top: 40%;
+}
+
+#logo {
+    height: 30px;    
+}
+
+</style>
+</head>
+<body>
+<nav class="navbar navbar-default">
+  <div class="container-fluid">
+    <div class="navbar-header">
+      <a class="navbar-brand" href="#">
+        <img id="logo" alt="Brand" src="./assets/img/visualbi-logo.png">
+      </a>
+    </div>
+  </div>
+</nav>
+<div class="container"> 
+    <div class="row"> 
+        <div id="form_container" class="panel panel-primary">
+            <div class="panel-heading">
+                <h3 class="panel-title">API Information</h3>
+            </div>
+            <div class="panel-body small">
+                <div class="form-group row">
+                    <label for="username" class="col-xs-4 col-form-label">API Username</label>
+                    <div class="col-xs-8">
+                        <input class="form-control input-sm" type="text" value="" id="username">
+                    </div>
+                </div>
+
+                <div class="form-group row">
+                    <label for="password" class="col-xs-4 col-form-label">API Password</label>
+                    <div class="col-xs-8">
+                        <input class="form-control input-sm" type="text" value="" id="password">
+                    </div>
+                </div>
+
+                <div class="form-group row">
+                    <label for="password" class="col-xs-4 col-form-label">Choose File (.xlsx)</label>
+                    <div class="col-xs-8">
+                        <input class="form-control input-sm" type="file" name="xlfile" id="xlf" accept="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" >
+                    </div>
+                </div>
+
+                <div class="form-group row">
+                    <label for="password" class="col-xs-4 col-form-label">Email Column Name in file</label>
+                    <div class="col-xs-8">
+                        <input class="form-control input-sm" type="text"  id="col_email">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div  class="panel panel-danger row">
+        <div class="panel-heading">
+            <h3 class="panel-title">Message</h3>
+        </div>
+        <div id="msg" class="panel-body">
+        </div>
+    </div>
+    
+</div>
+<div id="processing_div"><img src="./assets/img/processing.gif" /></div>
+<!-- <pre id="out"></pre> -->
+<br />
+<script src="./assets/jquery/jquery-3.1.1.min.js"></script>
+<script src="./assets/xlsx/jszip.js"></script>
+<script src="./assets/xlsx/xlsx.js"></script>
+<script src="./assets/xlsx/papaparse.min.js"></script>
+<script src="./assets/bluebird/bluebird.js"></script>
+<script src="./assets/xlsx/filesaver.js"></script>
+<script>
+var X = XLSX;
+var api_usr = '';
+var api_pwd = '';
+
+var rABS = typeof FileReader !== "undefined" && typeof FileReader.prototype !== "undefined" && typeof FileReader.prototype.readAsBinaryString !== "undefined";
+
+/* function referred from  http://oss.sheetjs.com/js-xlsx/ */
+function fixdata(data) {
+	var o = "", l = 0, w = 10240;
+	for(; l<data.byteLength/w; ++l) o+=String.fromCharCode.apply(null,new Uint8Array(data.slice(l*w,l*w+w)));
+	o+=String.fromCharCode.apply(null, new Uint8Array(data.slice(l*w)));
+	return o;
+}
+
+// Function to convert excel sheet into json format 
+/* function referred from  http://oss.sheetjs.com/js-xlsx/ */
+function to_json(workbook) {
+	var result = {};
+	workbook.SheetNames.forEach(function(sheetName) {
+		var roa = X.utils.sheet_to_row_object_array(workbook.Sheets[sheetName]);
+		if(roa.length > 0){
+			result[sheetName] = roa;
+		}
+	});
+	return result;
+}
+
+// Function to write the processed data which is in json format into csv file and download it in browser. 
+function to_csv(data) {
+	var csvData = Papa.unparse(data);
+    /*var BOM = "\uFEFF";
+    var    csvData = BOM + JSON.stringify(output);*/
+    var blob = new Blob([csvData], { type: "text/csv;charset=utf-8" });
+    saveAs(blob, "verified_email.csv");
+    $("#processing_div").hide();
+}
+
+// Function to send request to node api and get json response to verify the email.
+function verify_email(ve_json, col){
+    return new Promise(function(resolve, reject){
+        var emailid = ve_json[col];
+        var api = 'http://localhost:3000/api/' + api_usr + '/' + api_pwd + '/' +  emailid;  // Node API URL
+        console.log("api = " + api);
+        var timeout = 100;//Math.floor((Math.random() * 200));
+        /*setTimeout(function(){
+            ve_json['verified_'+ col] = 1;
+            resolve();
+        }, timeout);*/
+        $.get(api, function(data){
+            var res = JSON.parse(data);
+            if(res['authentication_status']){           
+                ve_json['verified_'+ col] = (typeof res['verify_status'] != "undefined" ? res['verify_status'] : 'NA');
+                if(ve_json['verified_'+ col] == 0 || ve_json['verified_'+ col] == 'NA'){
+                    dispMsg(ve_json[col] + ' cannot be verified!', 'warning');
+                }                            
+            }
+            else
+            {
+                dispMsg('Wrong username or password');                
+            }
+            resolve();
+        });
+    });    
+}
+
+function dispMsg(msg, type){
+    if(!type){
+        type = 'danger';
+    }
+    var msgStr = '<div class="alert alert-'+type+'" role="alert">'+ msg + '</div>';
+    $("#msg").append(msgStr);
+}
+
+// Function to validate email address
+function validateEmail(email) {
+  var re = /^(([^<>()[\]\\.,;:\s@\"]+(\.[^<>()[\]\\.,;:\s@\"]+)*)|(\".+\"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+  return re.test(email);
+}
+
+// Function to identify email column in the excel sheet.
+function identify_email_column(sheet){
+    var cols = [];
+    for(var i=0; i<10; i++){
+        var row = sheet[i];
+        var col = [];
+        $.each(row, function(k,v){
+            var isEmail = validateEmail(v);
+            if(isEmail){
+                col.push(k);
+            }
+        });
+        if(!cols.length || cols[cols.length - 1].toString() != col.toString()){
+            cols.push(col);
+        }        
+    }
+
+    if(cols.length >1){        
+        dispMsg('Unable to find Email Column');
+        cols = [[]];
+    }   
+    return cols[0];
+}
+
+function startProcessing(){
+    $("#processing_div").show();
+}
+
+function stopProcessing(){
+    $("#processing_div").hide();
+}
+
+// Main function to verify email in the excel file by iterating through each row and calling the node api to verify the given Email Id. 
+function process_wb(wb) {
+	var output = "";
+    var ve_json = {};
+    var input_email_col = $("#col_email").val();
+    var email_cols = [];    
+    var promise_arr = [];
+    //output = JSON.stringify(to_json(wb), 2, 2);
+    output = to_json(wb);
+    if(input_email_col==''){
+        email_cols = identify_email_column(output.Sheet1);
+    }
+    else
+    {
+        email_cols = email_cols.concat(input_email_col.split(','));
+    }
+    if(email_cols.length){
+        $.each(output.Sheet1, function(index,row){            
+            for(var i=0, len=email_cols.length; i< len; i++){
+                if(row[email_cols[i]]){                                         
+                    promise_arr.push(verify_email(row, email_cols[i]));
+                }                
+            }
+        });
+
+        Promise.all(promise_arr).then(function(){
+            to_csv(output.Sheet1);
+            console.log("Process completed successfully on ", new Date());
+        });
+    }	
+    else
+    {
+        stopProcessing();
+    }
+}
+
+// Function to read excel file and get input values
+/* part of function referred from  http://oss.sheetjs.com/js-xlsx/ */
+function handleFile(e) {    
+	api_usr = $("#username").val();
+    api_pwd = $("#password").val();
+	var files = e.target.files;
+	var f = files[0];	
+    var reader = new FileReader();
+    var name = f.name;
+    var file_extension = name.split('.').pop();
+
+    if(file_extension!='xls' && file_extension!='xlsx'){
+        dispMsg('Please upload file having .xlsx extension');
+        return false;
+    }
+    reader.onload = function(e) {			
+        var data = e.target.result;
+        var wb;
+        if(rABS) {
+            wb = X.read(data, {type: 'binary'});
+        } else {
+        var arr = fixdata(data);
+            wb = X.read(btoa(arr), {type: 'base64'});
+        }
+        startProcessing();
+        process_wb(wb);
+    };
+    if(rABS) reader.readAsBinaryString(f);
+    else reader.readAsArrayBuffer(f);
+	
+}
+
+$("#xlf").on('change', handleFile);
+
+</script>
+
+</body>
+</html>
